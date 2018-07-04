@@ -1,0 +1,9 @@
+x64/
+bin/
+obj/
+.vs/
+packages/
+[dD]ebug/
+[bB]in/
+*.user
+*.suo

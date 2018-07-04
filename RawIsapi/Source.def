@@ -1,0 +1,7 @@
+LIBRARY
+
+EXPORTS GetExtensionVersion
+
+HttpExtensionProc
+
+DllMain
