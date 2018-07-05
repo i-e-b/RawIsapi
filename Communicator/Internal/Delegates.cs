@@ -22,7 +22,7 @@ namespace Communicator.Internal
 
             Int32 bytesDeclared,
             Int32 bytesAvailable,
-            byte[] data,
+            IntPtr data,
 
             GetServerVariableDelegate getServerVariable, WriteClientDelegate writeClient, ReadClientDelegate readClient,
             IntPtr serverSupport // The server support function has many forms, so we use it dynamically

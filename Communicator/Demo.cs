@@ -3,6 +3,8 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using Communicator.Internal;
+using static Communicator.Internal.Delegates;
+using Tag;
 
 namespace Communicator
 {
@@ -13,9 +15,9 @@ namespace Communicator
     {
 
         static GCHandle GcShutdownDelegateHandle;
-        static readonly Delegates.VoidDelegate ShutdownPtr;
+        static readonly VoidDelegate ShutdownPtr;
         static GCHandle GcHandleRequestDelegateHandle;
-        static readonly Delegates.HandleHttpRequestDelegate HandlePtr;
+        static readonly HandleHttpRequestDelegate HandlePtr;
 
         /// <summary>
         /// Build our function tables...
@@ -55,9 +57,9 @@ namespace Communicator
                 var bSetOk = Win32.SetSharedMem(Marshal.GetFunctionPointerForDelegate(del).ToInt64());
                 return bSetOk ? 1 : 0;
             }
-            catch (Exception ex)
+            catch //(Exception ex)
             {
-                File.AppendAllText(@"C:\Temp\InnerError.txt", "\r\nError when sending delegate: " + ex);
+                //File.AppendAllText(@"C:\Temp\InnerError.txt", "\r\nError when sending delegate: " + ex);
                 return -2;
             }
         }
@@ -77,35 +79,48 @@ namespace Communicator
 
             Int32 bytesDeclared,
             Int32 bytesAvailable,
-            byte[] data,
+            IntPtr data,
 
-            Delegates.GetServerVariableDelegate getServerVariable, Delegates.WriteClientDelegate writeClient, Delegates.ReadClientDelegate readClient, IntPtr serverSupport)
+            GetServerVariableDelegate getServerVariable, WriteClientDelegate writeClient, ReadClientDelegate readClient, IntPtr serverSupport)
         {
-            // Send header:
             try
             {
-                TryWriteHeaders(conn, serverSupport);
+                var head = T.g("head")[T.g("title")[".Net Output"]];
+                
+                var body = T.g("body")[
+                    T.g("h1")["Hello"],
+                    T.g("p")[".Net here!"],
+                    T.g("p")["You called me with these properties:"],
 
+                    T.g("dl")[
+                        Def("Verb", verb),
+                        Def("Query string", query),
+                        Def("URL path", pathInfo),
+                        Def("Equivalent file path", pathTranslated),
+                        Def("Requested content type", contentType)
+                    ],
 
-                var sb = new StringBuilder();
-                sb.Append("<html><head><title>.Net output</title></head><body>");
+                    T.g("p")["Client supplied "+bytesAvailable+" bytes out of an expected "+bytesDeclared+" bytes"]
+                ];
 
+                if (bytesAvailable > 0) {
+                    byte[] strBytes = new byte[bytesAvailable];
+                    Marshal.Copy(data, strBytes, 0, bytesAvailable);
+                    var sent = Encoding.UTF8.GetString(strBytes);
+                    body.Add(T.g("p")["here's a text version of what you sent:"]);
+                    body.Add(T.g("pre")[sent]);
+                }
 
-                sb.Append("Hello! .Net here.<dl>");
+                var page = T.g("html")[ head, body ];
 
-                sb.Append("<dt>Verb</dt><dd>" + verb + "</dd>");
-                sb.Append("<dt>Query</dt><dd>" + query + "</dd>");
-                sb.Append("<dt>Path Info</dt><dd>" + pathInfo + "</dd>");
-                sb.Append("<dt>Path Translated</dt><dd>" + pathTranslated + "</dd>");
-                sb.Append("<dt>Content Type</dt><dd>" + contentType + "</dd>");
-
-                sb.Append("</dl>");
-
-                sb.Append("</body></html>");
-
-                sb.Append('\0');
-                var msg = Encoding.UTF8.GetBytes(sb.ToString());
+                var ms = new MemoryStream();
+                page.StreamTo(ms, Encoding.UTF8);
+                ms.WriteByte(0);
+                ms.Seek(0, SeekOrigin.Begin);
+                var msg = ms.ToArray();
                 int len = msg.Length;
+
+                TryWriteHeaders(conn, serverSupport);
                 writeClient(conn, msg, ref len, 0);
             }
             catch (Exception ex)
@@ -116,12 +131,20 @@ namespace Communicator
             }
         }
 
+        private static TagContent Def(string name, string value)
+        {
+            return T.g()[
+                T.g("dt")[name],
+                T.g("dd")[value]
+            ];
+        }
+
         /// <summary>
         /// Test of 'ex' status writing
         /// </summary>
         private static void TryWriteHeaders(IntPtr conn, IntPtr ss)
         {
-            var headerCall = Marshal.GetDelegateForFunctionPointer<Delegates.ServerSupportFunctionDelegate_Headers>(ss);
+            var headerCall = Marshal.GetDelegateForFunctionPointer<ServerSupportFunctionDelegate_Headers>(ss);
 
             var data = new SendHeaderExInfo
             {
