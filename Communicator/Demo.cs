@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace Communicator
@@ -12,6 +13,8 @@ namespace Communicator
         // Any delegates should match exactly on the C++ side
         public delegate void VoidDelegate();
 
+        public delegate void StringStringDelegate([MarshalAs(UnmanagedType.LPWStr)]string input, [MarshalAs(UnmanagedType.BStr)]out string output);
+
         /// <summary>Send data back to the host</summary>
         /// <remarks>
         /// Sneaky trick -- we use the host dll to talk to itself.
@@ -23,6 +26,8 @@ namespace Communicator
 
         static GCHandle GcShutdownDelegateHandle;
         static readonly VoidDelegate ShutdownPtr;
+        static GCHandle GcTestDelegateHandle;
+        static readonly StringStringDelegate TestPtr;
 
         /// <summary>
         /// Build our function tables...
@@ -30,6 +35,9 @@ namespace Communicator
         static Demo () {
             ShutdownPtr = ShutdownCallback; // get permanent function pointer
             GcShutdownDelegateHandle = GCHandle.Alloc(ShutdownPtr); // prevent garbage collection
+
+            TestPtr = TestCallback;
+            GcTestDelegateHandle = GCHandle.Alloc(TestPtr); // prevent garbage collection
         }
 
         /// <summary>
@@ -42,6 +50,9 @@ namespace Communicator
             switch (requestType) {
                 case "Shutdown":
                     return WriteFunctionPointer(ShutdownPtr);
+
+                case "Test":
+                    return WriteFunctionPointer(TestPtr);
 
                 default: return -1;
             }
@@ -64,6 +75,13 @@ namespace Communicator
         public static void ShutdownCallback()
         {
             GcShutdownDelegateHandle.Free();
+            GcTestDelegateHandle.Free();
+        }
+        
+
+        public static void TestCallback(string input, out string output)
+        {
+            output = string.Join("", input.Reverse()); // just a test
         }
     }
 }

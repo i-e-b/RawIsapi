@@ -4,4 +4,6 @@ EXPORTS GetExtensionVersion
 
 HttpExtensionProc
 
+TerminateExtension
+
 DllMain
