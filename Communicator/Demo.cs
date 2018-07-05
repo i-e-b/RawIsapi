@@ -85,6 +85,9 @@ namespace Communicator
         {
             try
             {
+
+                var headers = TryGetHeaders(conn, getServerVariable);
+
                 var head = T.g("head")[T.g("title")[".Net Output"]];
                 
                 var body = T.g("body")[
@@ -98,6 +101,10 @@ namespace Communicator
                         Def("URL path", pathInfo),
                         Def("Equivalent file path", pathTranslated),
                         Def("Requested content type", contentType)
+                    ],
+
+                    T.g("p")["Request headers: ",
+                        T.g("pre")[headers]
                     ],
 
                     T.g("p")["Client supplied "+bytesAvailable+" bytes out of an expected "+bytesDeclared+" bytes"]
@@ -128,6 +135,18 @@ namespace Communicator
                 var msg = Encoding.UTF8.GetBytes(ex.ToString());
                 int len = msg.Length;
                 writeClient(conn, msg, ref len, 0);
+            }
+        }
+
+        private static string TryGetHeaders(IntPtr conn, GetServerVariableDelegate callback)
+        {
+            var size = 4096;
+            var buffer = Marshal.AllocHGlobal(size);
+            try {
+                callback(conn, "UNICODE_ALL_RAW", buffer, ref size);
+                return Marshal.PtrToStringUni(buffer);
+            } finally {
+                Marshal.FreeHGlobal(buffer);
             }
         }
 

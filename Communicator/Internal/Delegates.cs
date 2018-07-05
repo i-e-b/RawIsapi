@@ -30,10 +30,17 @@ namespace Communicator.Internal
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+        /// <summary>
+        /// Read context server variables (IIS speak for request headers)
+        /// </summary>
+        /// <param name="hConn">Context id</param>
+        /// <param name="lpszVariableName">variable anem</param>
+        /// <param name="lpvBuffer">A caller-allocated buffer for response</param>
+        /// <param name="lpdwSize">Size of buffer. If failed due to too small, required buffer size is put in here</param>
         [UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet = CharSet.Unicode)]
         public delegate bool GetServerVariableDelegate(IntPtr hConn,
                                                         [MarshalAs(UnmanagedType.LPStr)]string lpszVariableName,
-                                                        [MarshalAs(UnmanagedType.LPArray)]byte[] lpvBuffer,
+                                                        IntPtr lpvBuffer,
                                                         ref Int32 lpdwSize);
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet = CharSet.Unicode)]
