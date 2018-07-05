@@ -1,12 +1,30 @@
 ﻿using System;
-using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Communicator
 {
+    // Any delegates should match exactly on the C++ side
+    public delegate void VoidDelegate();
+    public delegate void StringStringDelegate([MarshalAs(UnmanagedType.LPWStr)]string input, [MarshalAs(UnmanagedType.BStr)]out string output);
+
+    /// <summary>
+    /// Handle a request from IIS.
+    /// </summary>
+    /// <remarks>This is the parts of EXTENSION_CONTROL_BLOCK that are useful</remarks>
+    public delegate void HandleHttpRequestDelegate(IntPtr conn,
+        [MarshalAs(UnmanagedType.LPStr)] string verb,
+        [MarshalAs(UnmanagedType.LPStr)] string query,
+        [MarshalAs(UnmanagedType.LPStr)] string pathInfo,
+        [MarshalAs(UnmanagedType.LPStr)] string pathTranslated,
+        [MarshalAs(UnmanagedType.LPStr)] string contentType,
+
+        Int32 bytesDeclared,
+        Int32 bytesAvailable,
+        byte[] data,
+
+        GetServerVariableDelegate getServerVariable, WriteClientDelegate writeClient, ReadClientDelegate readClient, ServerSupportFunctionDelegate serverSupport);
 
     [StructLayout(LayoutKind.Sequential)]
     public class EXTENSION_CONTROL_BLOCK {
@@ -34,13 +52,6 @@ namespace Communicator
         
         //[MarshalAs(UnmanagedType.LPStr)]
         public IntPtr/*string*/     lpszContentType;        // Content type of client data
-
-        public IntPtr A;
-        [MarshalAs(UnmanagedType.FunctionPtr)]
-        public WriteClientDelegate WriteClient;
-        //public IntPtr B;
-        public IntPtr C;
-        public IntPtr D;
 
         /*
         [MarshalAs(UnmanagedType.FunctionPtr)]
@@ -85,10 +96,6 @@ namespace Communicator
     /// </summary>
     public class Demo
     {
-        // Any delegates should match exactly on the C++ side
-        public delegate void VoidDelegate();
-        public delegate void StringStringDelegate([MarshalAs(UnmanagedType.LPWStr)]string input, [MarshalAs(UnmanagedType.BStr)]out string output);
-        public delegate void HandleHttpRequestDelegate(IntPtr conn, WriteClientDelegate ecb);
 
         /// <summary>Send data back to the host</summary>
         /// <remarks>
@@ -101,8 +108,6 @@ namespace Communicator
 
         static GCHandle GcShutdownDelegateHandle;
         static readonly VoidDelegate ShutdownPtr;
-        static GCHandle GcTestDelegateHandle;
-        static readonly StringStringDelegate TestPtr;
         static GCHandle GcHandleRequestDelegateHandle;
         static readonly HandleHttpRequestDelegate HandlePtr;
 
@@ -112,9 +117,6 @@ namespace Communicator
         static Demo () {
             ShutdownPtr = ShutdownCallback; // get permanent function pointer
             GcShutdownDelegateHandle = GCHandle.Alloc(ShutdownPtr); // prevent garbage collection
-
-            TestPtr = TestCallback;
-            GcTestDelegateHandle = GCHandle.Alloc(TestPtr);
 
             HandlePtr = HandleHttpRequestCallback;
             GcHandleRequestDelegateHandle = GCHandle.Alloc(HandlePtr);
@@ -133,9 +135,6 @@ namespace Communicator
 
                 case "Handle":
                     return WriteFunctionPointer(HandlePtr);
-
-                case "Test":
-                    return WriteFunctionPointer(TestPtr);
 
                 default: return -1;
             }
@@ -158,42 +157,44 @@ namespace Communicator
         public static void ShutdownCallback()
         {
             GcShutdownDelegateHandle.Free();
-            GcTestDelegateHandle.Free();
             GcHandleRequestDelegateHandle.Free();
         }
         
-        static string lastMsg = "No call made";
-        
-        public static void HandleHttpRequestCallback(IntPtr conn, WriteClientDelegate ecb)
+        public static void HandleHttpRequestCallback(IntPtr conn,
+            [MarshalAs(UnmanagedType.LPStr)] string verb,
+            [MarshalAs(UnmanagedType.LPStr)] string query,
+            [MarshalAs(UnmanagedType.LPStr)] string pathInfo,
+            [MarshalAs(UnmanagedType.LPStr)] string pathTranslated,
+            [MarshalAs(UnmanagedType.LPStr)] string contentType,
+
+            Int32 bytesDeclared,
+            Int32 bytesAvailable,
+            byte[] data,
+
+            GetServerVariableDelegate getServerVariable, WriteClientDelegate writeClient, ReadClientDelegate readClient, ServerSupportFunctionDelegate serverSupport)
         {
-            var msg = Encoding.UTF8.GetBytes("Hello directly from .Net!\0");
+            var sb = new StringBuilder();
+            sb.Append("<html><head><title>.Net output</title></head><body>");
+
+
+            sb.Append("Hello! .Net here.<dl>");
+
+            sb.Append("<dt>Verb</dt><dd>"+verb+"</dd>");
+            sb.Append("<dt>Query</dt><dd>"+query+"</dd>");
+            sb.Append("<dt>Path Info</dt><dd>"+pathInfo+"</dd>");
+            sb.Append("<dt>Path Translated</dt><dd>"+pathTranslated+"</dd>");
+            sb.Append("<dt>Content Type</dt><dd>"+contentType+"</dd>");
+
+            sb.Append("</dl>");
+
+            sb.Append("</body></html>");
+
+            sb.Append('\0');
+            var msg = Encoding.UTF8.GetBytes(sb.ToString());
             int len = msg.Length;
-            ecb(conn, msg, ref len, 0);
-            
-            //var msg = Encoding.UTF8.GetBytes("Hello directly from .Net!");
-            //int leng = msg.Length;
-            //ecb.WriteClient(ecb.ConnID, msg, ref leng, 0);
-            /*try
-            {
-                lastMsg = "\r\nActual pointer: " + ecb.ToString("X");
+            writeClient(conn, msg, ref len, 0);
 
-                var ptr = new IntPtr(ecb);
-                lastMsg += "\r\nDerefd pointer: " + ptr.ToString("X");
-                // var x = Marshal.PtrToStructure<EXTENSION_CONTROL_BLOCK>(ecb);
-                //lastMsg = x.lpszQueryString;
-            }
-            catch (Exception ex)
-            {
-                lastMsg = ex.ToString();
-            }*/
         }
 
-        public static void TestCallback(string input, out string output)
-        {
-            //Debugger.Launch(); // this doesn't quite work...
-            //output = string.Join("", input.Reverse()); // just a test
-
-            output = lastMsg;
-        }
     }
 }
