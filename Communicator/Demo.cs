@@ -24,7 +24,11 @@ namespace Communicator
         Int32 bytesAvailable,
         byte[] data,
 
-        GetServerVariableDelegate getServerVariable, WriteClientDelegate writeClient, ReadClientDelegate readClient, ServerSupportFunctionDelegate serverSupport);
+        GetServerVariableDelegate getServerVariable, WriteClientDelegate writeClient, ReadClientDelegate readClient,
+        IntPtr serverSupport // The server support function has many forms, so we use it dynamically
+    );
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
 
     [StructLayout(LayoutKind.Sequential)]
     public class EXTENSION_CONTROL_BLOCK {
@@ -84,12 +88,21 @@ namespace Communicator
                                             [MarshalAs(UnmanagedType.LPArray)]byte[] lpvBuffer,
                                             ref Int32 lpdwSize);
     
+    // The various forms of ServerSupportFunction...
     [UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet = CharSet.Unicode)]
-    public delegate bool ServerSupportFunctionDelegate(IntPtr hConn,
+    public delegate bool ServerSupportFunctionDelegate_Generic(IntPtr hConn,
                                                         Int32 dwHSERequest,
-                                                        [MarshalAs(UnmanagedType.LPArray)]byte[] lpvBuffer,
-                                                        ref Int32 lpdwSize,
-                                                        ref Int32 lpdwDataType);
+                                                        IntPtr lpvBuffer,
+                                                        IntPtr lpdwSize,
+                                                        IntPtr lpdwDataType);
+    
+    
+    [UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet = CharSet.Unicode)]
+    public delegate bool ServerSupportFunctionDelegate_Headers(IntPtr hConn,
+        Int32 dwHSERequest,
+        SendHeaderExInfo lpvBuffer,
+        IntPtr lpdwSize,
+        IntPtr lpdwDataType);
 
     /// <summary>
     /// Shows the use of C# to drive a C++ shim
@@ -110,6 +123,12 @@ namespace Communicator
         static readonly VoidDelegate ShutdownPtr;
         static GCHandle GcHandleRequestDelegateHandle;
         static readonly HandleHttpRequestDelegate HandlePtr;
+        
+
+
+        //c:\Program Files (x86)\Windows Kits\10\Include\10.0.17134.0\um\HttpExt.h
+        public const int HSE_REQ_SEND_RESPONSE_HEADER    = 3;    // old
+        public const int HSE_REQ_SEND_RESPONSE_HEADER_EX = 1016; // new
 
         /// <summary>
         /// Build our function tables...
@@ -171,30 +190,109 @@ namespace Communicator
             Int32 bytesAvailable,
             byte[] data,
 
-            GetServerVariableDelegate getServerVariable, WriteClientDelegate writeClient, ReadClientDelegate readClient, ServerSupportFunctionDelegate serverSupport)
+            GetServerVariableDelegate getServerVariable, WriteClientDelegate writeClient, ReadClientDelegate readClient, IntPtr serverSupport)
         {
-            var sb = new StringBuilder();
-            sb.Append("<html><head><title>.Net output</title></head><body>");
+            // Send header:
+            /*
+    char MyHeader[4096];
+    strcpy(MyHeader, "Content-type: text/html\n\n");
+    pEcb->ServerSupportFunction(pEcb->ConnID, HSE_REQ_SEND_RESPONSE_HEADER, NULL, 0, (DWORD *)MyHeader);*/
 
 
-            sb.Append("Hello! .Net here.<dl>");
+            // Send headers the buggy old way:
+            /*var header = CString("Content-type: text/html\n\n");
+            var status = CString("My Status String");
+            GCHandle pinnedArray = GCHandle.Alloc(header, GCHandleType.Pinned);
+            IntPtr pointer = pinnedArray.AddrOfPinnedObject();
+            int zero = 0;
+            serverSupport(conn, HSE_REQ_SEND_RESPONSE_HEADER, status, ref zero, pointer);
+            pinnedArray.Free();*/
+            
+            try {
+                TryWriteHeaders(conn, serverSupport);
 
-            sb.Append("<dt>Verb</dt><dd>"+verb+"</dd>");
-            sb.Append("<dt>Query</dt><dd>"+query+"</dd>");
-            sb.Append("<dt>Path Info</dt><dd>"+pathInfo+"</dd>");
-            sb.Append("<dt>Path Translated</dt><dd>"+pathTranslated+"</dd>");
-            sb.Append("<dt>Content Type</dt><dd>"+contentType+"</dd>");
 
-            sb.Append("</dl>");
+                var sb = new StringBuilder();
+                sb.Append("<html><head><title>.Net output</title></head><body>");
 
-            sb.Append("</body></html>");
 
-            sb.Append('\0');
-            var msg = Encoding.UTF8.GetBytes(sb.ToString());
-            int len = msg.Length;
-            writeClient(conn, msg, ref len, 0);
+                sb.Append("Hello! .Net here.<dl>");
 
+                sb.Append("<dt>Verb</dt><dd>" + verb + "</dd>");
+                sb.Append("<dt>Query</dt><dd>" + query + "</dd>");
+                sb.Append("<dt>Path Info</dt><dd>" + pathInfo + "</dd>");
+                sb.Append("<dt>Path Translated</dt><dd>" + pathTranslated + "</dd>");
+                sb.Append("<dt>Content Type</dt><dd>" + contentType + "</dd>");
+
+                sb.Append("</dl>");
+
+                sb.Append("</body></html>");
+
+                sb.Append('\0');
+                var msg = Encoding.UTF8.GetBytes(sb.ToString());
+                int len = msg.Length;
+                writeClient(conn, msg, ref len, 0);
+            }
+            catch (Exception ex)
+            {
+                var msg = Encoding.UTF8.GetBytes(ex.ToString());
+                int len = msg.Length;
+                writeClient(conn, msg, ref len, 0);
+            }
         }
 
+        /// <summary>
+        /// Test of 'ex' status writing
+        /// </summary>
+        private static void TryWriteHeaders(IntPtr conn, IntPtr ss)
+        {
+            var headerCall = Marshal.GetDelegateForFunctionPointer<ServerSupportFunctionDelegate_Headers>(ss);
+
+            var data = new SendHeaderExInfo{
+                fKeepConn = false,
+                pszHeader = "X-Fish: I come from the marshall\r\nContent-type: text/html\r\n\r\n",
+                pszStatus = "200 OK-dokey"
+            };
+
+            data.cchStatus = data.pszStatus.Length;
+            data.cchHeader = data.pszHeader.Length;
+
+            headerCall(conn, HSE_REQ_SEND_RESPONSE_HEADER_EX, data, IntPtr.Zero, IntPtr.Zero);
+        }
+
+        private static byte[] CString(string str)
+        {
+            return Encoding.ASCII.GetBytes(str + "\0");
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public class SendHeaderExInfo
+    {
+        /// <summary>
+        /// The NULL-terminated string containing the status of the current request.
+        /// </summary>
+        public string pszStatus;
+
+        /// <summary>
+        /// The NULL-terminated string containing the header to return.
+        /// </summary>
+        public string pszHeader;
+
+        /// <summary>
+        /// The number of characters in the status code.
+        /// </summary>
+        public Int32 cchStatus;
+
+        /// <summary>
+        /// The number of characters in the header.
+        /// </summary>
+        public Int32 cchHeader;
+
+        /// <summary>
+        /// A Boolean indicating whether or not the connection that was used to process the request should remain active
+        /// </summary>
+        [MarshalAs(UnmanagedType.Bool)]
+        public bool fKeepConn;
     }
 }
