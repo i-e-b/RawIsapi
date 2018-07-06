@@ -13,14 +13,13 @@ namespace Communicator
     /// </summary>
     public class Demo
     {
-
         static GCHandle GcShutdownDelegateHandle;
         static readonly VoidDelegate ShutdownPtr;
         static GCHandle GcHandleRequestDelegateHandle;
         static readonly HandleHttpRequestDelegate HandlePtr;
 
         /// <summary>
-        /// Build our function tables...
+        /// Static constructor. Build the function pointers
         /// </summary>
         static Demo()
         {
@@ -70,7 +69,9 @@ namespace Communicator
             GcHandleRequestDelegateHandle.Free();
         }
 
-        public static void HandleHttpRequestCallback(IntPtr conn,
+        public static void HandleHttpRequestCallback(
+        #region params
+            IntPtr conn,
             [MarshalAs(UnmanagedType.LPStr)] string verb,
             [MarshalAs(UnmanagedType.LPStr)] string query,
             [MarshalAs(UnmanagedType.LPStr)] string pathInfo,
@@ -78,14 +79,14 @@ namespace Communicator
             [MarshalAs(UnmanagedType.LPStr)] string contentType,
 
             Int32 bytesDeclared,
-            Int32 bytesAvailable,
-            IntPtr data,
+            Int32 bytesAvailable, // if available < declared, you need to run `readClient` to get more
+            IntPtr data, // first blush of data, if any
 
             GetServerVariableDelegate getServerVariable, WriteClientDelegate writeClient, ReadClientDelegate readClient, IntPtr serverSupport)
+        #endregion
         {
             try
             {
-
                 var headers = TryGetHeaders(conn, getServerVariable);
 
                 var head = T.g("head")[T.g("title")[".Net Output"]];
@@ -107,7 +108,7 @@ namespace Communicator
                         T.g("pre")[headers]
                     ],
 
-                    T.g("p")["Client supplied "+bytesAvailable+" bytes out of an expected "+bytesDeclared+" bytes"]
+                    T.g("p")["Client supplied " + bytesAvailable + " bytes out of an expected " + bytesDeclared + " bytes"]
                 ];
 
                 if (bytesAvailable > 0) {
@@ -138,6 +139,17 @@ namespace Communicator
             }
         }
 
+        private static TagContent Def(string name, string value)
+        {
+            return T.g()[
+                T.g("dt")[name],
+                T.g("dd")[value]
+            ];
+        }
+
+        /// <summary>
+        /// Read headers from the incoming request
+        /// </summary>
         private static string TryGetHeaders(IntPtr conn, GetServerVariableDelegate callback)
         {
             var size = 4096;
@@ -148,14 +160,6 @@ namespace Communicator
             } finally {
                 Marshal.FreeHGlobal(buffer);
             }
-        }
-
-        private static TagContent Def(string name, string value)
-        {
-            return T.g()[
-                T.g("dt")[name],
-                T.g("dd")[value]
-            ];
         }
 
         /// <summary>
