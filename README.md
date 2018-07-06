@@ -11,3 +11,11 @@ Example of a raw ISAPI module communicating with a .Net assembly
 * Set `ISAPI and CGI Restrictions` on the IIS server to allow the dll to run.
 
 If you get `cannot open...` errors when rebuilding, recycle the IIS app pool.
+
+
+## To do:
+
+* [ ] Handle incoming data larger than initial buffer
+* [ ] Link the ecb to .Net startup if first try failed
+* [ ] Prove that we can call Huygens-hosted ASP.Net apps from the shim
+* [ ] Find a way to get errors thrown by the CLR side

@@ -1,8 +1,12 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using Communicator.Internal;
+using Huygens;
+using Huygens.Internal;
 using static Communicator.Internal.Delegates;
 using Tag;
 
@@ -18,6 +22,8 @@ namespace Communicator
         static GCHandle GcHandleRequestDelegateHandle;
         static readonly HandleHttpRequestDelegate HandlePtr;
 
+        private static DirectServer _proxy;
+
         /// <summary>
         /// Static constructor. Build the function pointers
         /// </summary>
@@ -28,6 +34,33 @@ namespace Communicator
 
             HandlePtr = HandleHttpRequestCallback;
             GcHandleRequestDelegateHandle = GCHandle.Alloc(HandlePtr);
+
+            // Try never to let an exception escape
+            AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
+            AppDomain.CurrentDomain.FirstChanceException += CurrentDomain_FirstChanceException;
+        }
+
+        private static void CurrentDomain_FirstChanceException(object sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs e)
+        {
+            var ex = e.Exception;
+            if (ex != null) RecPrintException(ex);
+            else File.AppendAllText(@"C:\Temp\RootException.txt", "\r\n\r\nNo exception");
+        }
+
+        private static void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
+        {
+            //var appDomain = sender as AppDomain;
+            var ex = e.ExceptionObject as Exception;
+
+            if (ex != null) RecPrintException(ex);
+            else File.AppendAllText(@"C:\Temp\RootException.txt", "\r\n\r\nNo exception");
+        }
+
+        private static void RecPrintException(Exception ex)
+        {
+            if (ex == null) return;
+            File.AppendAllText(@"C:\Temp\RootException.txt", "\r\n\r\n" + ex);
+            RecPrintException(ex.InnerException);
         }
 
         /// <summary>
@@ -69,6 +102,13 @@ namespace Communicator
             GcHandleRequestDelegateHandle.Free();
         }
 
+        // This is blowing up?
+        [DllImport("webengine4.dll")]
+        internal static extern int MgdGetSiteNameFromId(IntPtr pConfigSystem, [MarshalAs(UnmanagedType.U4)] uint siteId, out IntPtr bstrSiteName, out int cchSiteName);
+
+        /// <summary>
+        /// A simple demo responder
+        /// </summary>
         public static void HandleHttpRequestCallback(
         #region params
             IntPtr conn,
@@ -87,8 +127,9 @@ namespace Communicator
         {
             try
             {
-                var headers = TryGetHeaders(conn, getServerVariable);
-
+                if (_proxy == null) _proxy = new DirectServer("C:\\Temp\\WrappedSites\\1_rolling");
+                var headerString = TryGetHeaders(conn, getServerVariable);
+                
                 var head = T.g("head")[T.g("title")[".Net Output"]];
                 
                 var body = T.g("body")[
@@ -105,11 +146,58 @@ namespace Communicator
                     ],
 
                     T.g("p")["Request headers: ",
-                        T.g("pre")[headers]
+                        T.g("pre")[headerString]
                     ],
 
                     T.g("p")["Client supplied " + bytesAvailable + " bytes out of an expected " + bytesDeclared + " bytes"]
                 ];
+
+                /*var rq = new SerialisableRequest();
+                rq.Headers = SplitToDict(headerString);
+                rq.Method = verb;
+                rq.RequestUri = pathInfo;
+                if (!string.IsNullOrWhiteSpace(query)) rq.RequestUri += "?" + query;
+                rq.Content = ReadAllContent(bytesAvailable, bytesDeclared, data, readClient);
+                */
+
+                var rq = new SerialisableRequest
+                {
+                    RequestUri = "/values",
+                    Headers = new Dictionary<string, string>(),
+                    Content = new byte[0],
+                    Method = "GET"
+                };
+
+                // Something is going *very* wrong with this call:
+
+                try
+                {
+                    int cchSiteName;
+                    IntPtr bstrSiteName;
+                    uint siteId = 1;
+                    var hr = MgdGetSiteNameFromId(IntPtr.Zero, siteId, out bstrSiteName, out cchSiteName);
+
+                    var name = Marshal.PtrToStringBSTR(bstrSiteName);
+
+                    body.Add("Site name: ", name);
+                }
+                catch (Exception ex)
+                {
+                    body.Add("Call failure: " + ex);
+                }
+
+                //System.Web.Configuration.ProcessHostServerConfig.GetInstance();
+                //System.Web.Hosting.AspNetMemoryMonitor.s_configuredProcessMemoryLimit
+
+                //var tx = _proxy.DirectCall(rq);
+
+                /*
+                MemoryConnection memoryConnection = new MemoryConnection(rq);
+                var host = _proxy.GetHost();
+                host.ProcessRequest((IConnection)memoryConnection);
+                var tx = memoryConnection.GenerateResponse();
+                */
+
 
                 if (bytesAvailable > 0) {
                     byte[] strBytes = new byte[bytesAvailable];
@@ -118,6 +206,27 @@ namespace Communicator
                     body.Add(T.g("p")["here's a text version of what you sent:"]);
                     body.Add(T.g("pre")[sent]);
                 }
+
+
+                // spit out the Huygens response
+                /*if (tx != null)
+                {
+                    body.Add(T.g("hr/"));
+
+                    var responseHeaderList = T.g("dl");
+                    foreach (var header in tx.Headers)
+                    {
+                        responseHeaderList.Add(Def(header.Key, string.Join(",", header.Value)));
+                    }
+                    body.Add(
+                        T.g("h2")["Huygen proxy response:"],
+                        T.g("p")["Headers:"],
+                        responseHeaderList,
+                        T.g("p")["Status: ", tx.StatusCode + " ", tx.StatusMessage],
+                        T.g("p")["Response data (as utf8 string):"],
+                        T.g("pre")[Encoding.UTF8.GetString(tx.Content)]
+                        );
+                }*/
 
                 var page = T.g("html")[ head, body ];
 
@@ -137,6 +246,34 @@ namespace Communicator
                 int len = msg.Length;
                 writeClient(conn, msg, ref len, 0);
             }
+        }
+
+        private static byte[] ReadAllContent(int bytesAvailable, int bytesDeclared, IntPtr data, ReadClientDelegate readClient)
+        {
+            if (bytesDeclared < 1) return null;
+
+            byte[] strBytes = new byte[bytesAvailable];
+            Marshal.Copy(data, strBytes, 0, bytesAvailable);
+            // todo: read more data if required
+
+            return strBytes;
+        }
+
+        private static Dictionary<string, string> SplitToDict(string headerString)
+        {
+            var output = new Dictionary<string,string>();
+            var lines = headerString.Split(new []{'\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var line in lines)
+            {
+                var bits = line.Split(new []{ ": "}, 2, StringSplitOptions.None);
+                if (bits.Length != 2) continue; // invalid header
+
+                var key = bits[0].Trim();
+                var value = bits[1].Trim();
+                if (output.ContainsKey(key)) output[key] = output[key] + ", " + value;
+                else output.Add(key, value);
+            }
+            return output;
         }
 
         private static TagContent Def(string name, string value)
