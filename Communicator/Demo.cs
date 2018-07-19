@@ -1,12 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security;
+using System.Security.Permissions;
 using System.Text;
-using System.Threading;
+using System.Web;
 using Communicator.Internal;
 using Huygens;
-using Huygens.Internal;
 using static Communicator.Internal.Delegates;
 using Tag;
 
@@ -15,6 +17,10 @@ namespace Communicator
     /// <summary>
     /// Shows the use of C# to drive a C++ shim
     /// </summary>
+    [SuppressUnmanagedCodeSecurity]
+    [PermissionSet(SecurityAction.Demand, Unrestricted = true)]
+    [SecurityPermission(SecurityAction.Demand, Unrestricted = true)]
+    [SecurityCritical]
     public class Demo
     {
         static GCHandle GcShutdownDelegateHandle;
@@ -29,6 +35,10 @@ namespace Communicator
         /// </summary>
         static Demo()
         {
+            Type versionInfoType = typeof(HttpApplication).Assembly.GetType("System.Web.Util.VersionInfo");
+            FieldInfo exeNameField = versionInfoType.GetField("_exeName", BindingFlags.Static | BindingFlags.NonPublic);
+            exeNameField.SetValue(null, "AnythingElse.exe");
+
             ShutdownPtr = ShutdownCallback; // get permanent function pointer
             GcShutdownDelegateHandle = GCHandle.Alloc(ShutdownPtr); // prevent garbage collection
 
@@ -102,13 +112,13 @@ namespace Communicator
             GcHandleRequestDelegateHandle.Free();
         }
 
-        // This is blowing up?
-        [DllImport("webengine4.dll")]
-        internal static extern int MgdGetSiteNameFromId(IntPtr pConfigSystem, [MarshalAs(UnmanagedType.U4)] uint siteId, out IntPtr bstrSiteName, out int cchSiteName);
-
         /// <summary>
         /// A simple demo responder
         /// </summary>
+        [PermissionSet(SecurityAction.Demand, Unrestricted = true)]
+        [SecurityPermission(SecurityAction.Demand, Unrestricted = true, ControlAppDomain = true, UnmanagedCode = true)]
+        [SecurityCritical]
+        [SuppressUnmanagedCodeSecurity]
         public static void HandleHttpRequestCallback(
         #region params
             IntPtr conn,
@@ -169,34 +179,9 @@ namespace Communicator
                 };
 
                 // Something is going *very* wrong with this call:
+                var tx = _proxy.DirectCall(rq);
+                // Maybe try running outside of ISAPI, but still under the hosted CLR
 
-                try
-                {
-                    int cchSiteName;
-                    IntPtr bstrSiteName;
-                    uint siteId = 1;
-                    var hr = MgdGetSiteNameFromId(IntPtr.Zero, siteId, out bstrSiteName, out cchSiteName);
-
-                    var name = Marshal.PtrToStringBSTR(bstrSiteName);
-
-                    body.Add("Site name: ", name);
-                }
-                catch (Exception ex)
-                {
-                    body.Add("Call failure: " + ex);
-                }
-
-                //System.Web.Configuration.ProcessHostServerConfig.GetInstance();
-                //System.Web.Hosting.AspNetMemoryMonitor.s_configuredProcessMemoryLimit
-
-                //var tx = _proxy.DirectCall(rq);
-
-                /*
-                MemoryConnection memoryConnection = new MemoryConnection(rq);
-                var host = _proxy.GetHost();
-                host.ProcessRequest((IConnection)memoryConnection);
-                var tx = memoryConnection.GenerateResponse();
-                */
 
 
                 if (bytesAvailable > 0) {
@@ -209,7 +194,7 @@ namespace Communicator
 
 
                 // spit out the Huygens response
-                /*if (tx != null)
+                if (tx != null)
                 {
                     body.Add(T.g("hr/"));
 
@@ -226,7 +211,7 @@ namespace Communicator
                         T.g("p")["Response data (as utf8 string):"],
                         T.g("pre")[Encoding.UTF8.GetString(tx.Content)]
                         );
-                }*/
+                }
 
                 var page = T.g("html")[ head, body ];
 
@@ -242,8 +227,15 @@ namespace Communicator
             }
             catch (Exception ex)
             {
-                var msg = Encoding.UTF8.GetBytes(ex.ToString());
+                var ms = new MemoryStream();
+                var bytes = Encoding.UTF8.GetBytes("<pre>" + ex + "</pre>");
+                ms.Write(bytes, 0, bytes.Length);
+                ms.WriteByte(0);
+                ms.Seek(0, SeekOrigin.Begin);
+                var msg = ms.ToArray();
                 int len = msg.Length;
+
+                TryWriteHeaders(conn, serverSupport);
                 writeClient(conn, msg, ref len, 0);
             }
         }
@@ -309,7 +301,7 @@ namespace Communicator
             var data = new SendHeaderExInfo
             {
                 fKeepConn = false,
-                pszHeader = "X-Fish: I come from the marshall\r\nContent-type: text/html\r\n\r\n",
+                pszHeader = "X-Fish: I come from the marshall\r\nX-CB: "+typeof(DirectServer).Assembly.CodeBase+"\r\nContent-type: text/html\r\n\r\n",
                 pszStatus = "200 OK-dokey"
             };
 
