@@ -35,9 +35,11 @@ namespace Communicator
         /// </summary>
         static Demo()
         {
-            Type versionInfoType = typeof(HttpApplication).Assembly.GetType("System.Web.Util.VersionInfo");
-            FieldInfo exeNameField = versionInfoType.GetField("_exeName", BindingFlags.Static | BindingFlags.NonPublic);
-            exeNameField.SetValue(null, "AnythingElse.exe");
+            // TEMP: This block should be integrated into Huygens
+            //Type versionInfoType = typeof(HttpApplication).Assembly.GetType("System.Web.Util.VersionInfo");
+            //FieldInfo exeNameField = versionInfoType.GetField("_exeName", BindingFlags.Static | BindingFlags.NonPublic);
+            //exeNameField.SetValue(null, "AnythingElse.exe");
+            // END TEMP
 
             ShutdownPtr = ShutdownCallback; // get permanent function pointer
             GcShutdownDelegateHandle = GCHandle.Alloc(ShutdownPtr); // prevent garbage collection
