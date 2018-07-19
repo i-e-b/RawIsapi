@@ -1,12 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Security.Permissions;
 using System.Text;
-using System.Web;
 using Communicator.Internal;
 using Huygens;
 using static Communicator.Internal.Delegates;
@@ -35,12 +33,6 @@ namespace Communicator
         /// </summary>
         static Demo()
         {
-            // TEMP: This block should be integrated into Huygens
-            //Type versionInfoType = typeof(HttpApplication).Assembly.GetType("System.Web.Util.VersionInfo");
-            //FieldInfo exeNameField = versionInfoType.GetField("_exeName", BindingFlags.Static | BindingFlags.NonPublic);
-            //exeNameField.SetValue(null, "AnythingElse.exe");
-            // END TEMP
-
             ShutdownPtr = ShutdownCallback; // get permanent function pointer
             GcShutdownDelegateHandle = GCHandle.Alloc(ShutdownPtr); // prevent garbage collection
 
@@ -164,35 +156,23 @@ namespace Communicator
                     T.g("p")["Client supplied " + bytesAvailable + " bytes out of an expected " + bytesDeclared + " bytes"]
                 ];
 
-                /*var rq = new SerialisableRequest();
+                var rq = new SerialisableRequest();
                 rq.Headers = SplitToDict(headerString);
                 rq.Method = verb;
                 rq.RequestUri = pathInfo;
                 if (!string.IsNullOrWhiteSpace(query)) rq.RequestUri += "?" + query;
-                rq.Content = ReadAllContent(bytesAvailable, bytesDeclared, data, readClient);
-                */
+                rq.Content = ReadAllContent(conn, bytesAvailable, bytesDeclared, data, readClient);
 
+                /*
                 var rq = new SerialisableRequest
                 {
                     RequestUri = "/values",
                     Headers = new Dictionary<string, string>(),
                     Content = new byte[0],
                     Method = "GET"
-                };
+                };*/
 
-                // Something is going *very* wrong with this call:
                 var tx = _proxy.DirectCall(rq);
-                // Maybe try running outside of ISAPI, but still under the hosted CLR
-
-
-
-                if (bytesAvailable > 0) {
-                    byte[] strBytes = new byte[bytesAvailable];
-                    Marshal.Copy(data, strBytes, 0, bytesAvailable);
-                    var sent = Encoding.UTF8.GetString(strBytes);
-                    body.Add(T.g("p")["here's a text version of what you sent:"]);
-                    body.Add(T.g("pre")[sent]);
-                }
 
 
                 // spit out the Huygens response
@@ -242,15 +222,15 @@ namespace Communicator
             }
         }
 
-        private static byte[] ReadAllContent(int bytesAvailable, int bytesDeclared, IntPtr data, ReadClientDelegate readClient)
+        private static byte[] ReadAllContent(IntPtr connId, int bytesAvailable, int bytesDeclared, IntPtr data, ReadClientDelegate readClient)
         {
             if (bytesDeclared < 1) return null;
-
-            byte[] strBytes = new byte[bytesAvailable];
-            Marshal.Copy(data, strBytes, 0, bytesAvailable);
-            // todo: read more data if required
-
-            return strBytes;
+            
+            var dataStream = new IsapiClientStream(connId, bytesAvailable, bytesDeclared, data, readClient);
+            var msin = new MemoryStream();
+            dataStream.CopyTo(msin);
+            msin.Seek(0, SeekOrigin.Begin);
+            return msin.ToArray();
         }
 
         private static Dictionary<string, string> SplitToDict(string headerString)

@@ -56,6 +56,7 @@
     <Compile Include="Demo.cs" />
     <Compile Include="Internal\Delegates.cs" />
     <Compile Include="Internal\Win32.cs" />
+    <Compile Include="Internal\IsapiClientStream.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Internal\SendHeaderExInfo.cs" />

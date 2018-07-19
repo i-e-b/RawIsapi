@@ -49,6 +49,10 @@ namespace Communicator.Internal
                                                 ref Int32 lpdwBytes,
                                                 Int32 dwReserved);
 
+        /// <summary>
+        /// Read client supplied data
+        /// https://msdn.microsoft.com/en-us/library/ms525214(v=vs.90).aspx
+        /// </summary>
         [UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet = CharSet.Unicode)]
         public delegate bool ReadClientDelegate(IntPtr ConnID,
                                                 [MarshalAs(UnmanagedType.LPArray)]byte[] lpvBuffer,
