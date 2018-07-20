@@ -53,7 +53,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Demo.cs" />
+    <Compile Include="Entry.cs" />
     <Compile Include="Internal\Delegates.cs" />
     <Compile Include="Internal\Win32.cs" />
     <Compile Include="Internal\IsapiClientStream.cs" />

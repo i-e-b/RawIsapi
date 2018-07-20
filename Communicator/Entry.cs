@@ -13,13 +13,17 @@ using Tag;
 namespace Communicator
 {
     /// <summary>
-    /// Shows the use of C# to drive a C++ shim
+    /// Shows the use of C# to drive a C++ shim.
+    /// The C++ side assumes:
+    ///     - The C# dll will be in the same directory, called `Communicator.dll`
+    ///     - There is a type `Communicator.Entry`
+    ///     - That type has a public static method `int FindFunctionPointer(string requestType)`
     /// </summary>
     [SuppressUnmanagedCodeSecurity]
     [PermissionSet(SecurityAction.Demand, Unrestricted = true)]
     [SecurityPermission(SecurityAction.Demand, Unrestricted = true)]
     [SecurityCritical]
-    public class Demo
+    public class Entry
     {
         static GCHandle GcShutdownDelegateHandle;
         static readonly VoidDelegate ShutdownPtr;
@@ -31,7 +35,7 @@ namespace Communicator
         /// <summary>
         /// Static constructor. Build the function pointers
         /// </summary>
-        static Demo()
+        static Entry()
         {
             ShutdownPtr = ShutdownCallback; // get permanent function pointer
             GcShutdownDelegateHandle = GCHandle.Alloc(ShutdownPtr); // prevent garbage collection
@@ -42,6 +46,25 @@ namespace Communicator
             // Try never to let an exception escape
             AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
             AppDomain.CurrentDomain.FirstChanceException += CurrentDomain_FirstChanceException;
+        }
+
+        /// <summary>
+        /// This is a special format of method that can be directly called by `ExecuteInDefaultAppDomain`
+        /// <para>See https://docs.microsoft.com/en-us/dotnet/framework/unmanaged-api/hosting/iclrruntimehost-executeindefaultappdomain-method.</para>
+        /// We use this to provide function pointers for the C++ code to use.
+        /// </summary>
+        public static int FindFunctionPointer(string requestType)
+        {
+            switch (requestType)
+            {
+                case "Shutdown":
+                    return WriteFunctionPointer(ShutdownPtr);
+
+                case "Handle":
+                    return WriteFunctionPointer(HandlePtr);
+
+                default: return -1;
+            }
         }
 
         private static void CurrentDomain_FirstChanceException(object sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs e)
@@ -65,25 +88,6 @@ namespace Communicator
             if (ex == null) return;
             File.AppendAllText(@"C:\Temp\RootException.txt", "\r\n\r\n" + ex);
             RecPrintException(ex.InnerException);
-        }
-
-        /// <summary>
-        /// This is a special format of method that can be directly called by `ExecuteInDefaultAppDomain`
-        /// <para>See https://docs.microsoft.com/en-us/dotnet/framework/unmanaged-api/hosting/iclrruntimehost-executeindefaultappdomain-method.</para>
-        /// We use this to provide function pointers for the C++ code to use.
-        /// </summary>
-        public static int FindFunctionPointer(string requestType)
-        {
-            switch (requestType)
-            {
-                case "Shutdown":
-                    return WriteFunctionPointer(ShutdownPtr);
-
-                case "Handle":
-                    return WriteFunctionPointer(HandlePtr);
-
-                default: return -1;
-            }
         }
 
         private static int WriteFunctionPointer(Delegate del)
@@ -133,6 +137,8 @@ namespace Communicator
             {
                 if (_proxy == null) _proxy = new DirectServer("C:\\Temp\\WrappedSites\\1_rolling");
                 var headerString = TryGetHeaders(conn, getServerVariable);
+
+                var physicalPath = TryGetPhysPath(conn, getServerVariable);
                 
                 var head = T.g("head")[T.g("title")[".Net Output"]];
                 
@@ -146,6 +152,7 @@ namespace Communicator
                         Def("Query string", query),
                         Def("URL path", pathInfo),
                         Def("Equivalent file path", pathTranslated),
+                        Def("App physical path", physicalPath),
                         Def("Requested content type", contentType)
                     ],
 
@@ -162,15 +169,6 @@ namespace Communicator
                 rq.RequestUri = pathInfo;
                 if (!string.IsNullOrWhiteSpace(query)) rq.RequestUri += "?" + query;
                 rq.Content = ReadAllContent(conn, bytesAvailable, bytesDeclared, data, readClient);
-
-                /*
-                var rq = new SerialisableRequest
-                {
-                    RequestUri = "/values",
-                    Headers = new Dictionary<string, string>(),
-                    Content = new byte[0],
-                    Method = "GET"
-                };*/
 
                 var tx = _proxy.DirectCall(rq);
 
@@ -221,7 +219,8 @@ namespace Communicator
                 writeClient(conn, msg, ref len, 0);
             }
         }
-
+        
+        [SuppressUnmanagedCodeSecurity]
         private static byte[] ReadAllContent(IntPtr connId, int bytesAvailable, int bytesDeclared, IntPtr data, ReadClientDelegate readClient)
         {
             if (bytesDeclared < 1) return null;
@@ -261,13 +260,27 @@ namespace Communicator
         /// <summary>
         /// Read headers from the incoming request
         /// </summary>
+        [SuppressUnmanagedCodeSecurity]
         private static string TryGetHeaders(IntPtr conn, GetServerVariableDelegate callback)
         {
             var size = 4096;
             var buffer = Marshal.AllocHGlobal(size);
             try {
                 callback(conn, "UNICODE_ALL_RAW", buffer, ref size);
-                return Marshal.PtrToStringUni(buffer);
+                return Marshal.PtrToStringUni(buffer); // 'Uni' here matches 'UNICODE_' above.
+            } finally {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+        
+        [SuppressUnmanagedCodeSecurity]
+        private static string TryGetPhysPath(IntPtr conn, GetServerVariableDelegate callback)
+        {
+            var size = 4096;
+            var buffer = Marshal.AllocHGlobal(size);
+            try {
+                callback(conn, "APPL_PHYSICAL_PATH", buffer, ref size);
+                return Marshal.PtrToStringAnsi(buffer); // Must be ANSI for this variable
             } finally {
                 Marshal.FreeHGlobal(buffer);
             }
@@ -276,6 +289,7 @@ namespace Communicator
         /// <summary>
         /// Test of 'ex' status writing
         /// </summary>
+        [SuppressUnmanagedCodeSecurity]
         private static void TryWriteHeaders(IntPtr conn, IntPtr ss)
         {
             var headerCall = Marshal.GetDelegateForFunctionPointer<ServerSupportFunctionDelegate_Headers>(ss);
